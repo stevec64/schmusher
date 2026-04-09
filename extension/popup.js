@@ -53,64 +53,91 @@ function sendNativeMessage(msg) {
 // ── Folder browser ──
 
 async function navigateToFolder(path) {
-  currentFolder = path;
-  chrome.storage.local.set({ folder: path });
-
   try {
     const resp = await sendNativeMessage({ action: "listFolders", path });
-    if (!resp?.success) return;
+    if (!resp?.success) {
+      showFolderError("Could not read folder");
+      return;
+    }
 
-    renderBreadcrumbs(path);
-    renderFolderList(resp.folders, path);
-    // folder selected — path shown in breadcrumbs
+    // Use resolved path from native host (handles ~ expansion)
+    var resolvedPath = resp.path || path;
+    currentFolder = resolvedPath;
+    chrome.storage.local.set({ folder: resolvedPath });
+
+    renderBreadcrumbs(resolvedPath);
+    renderFolderList(resp.folders, resolvedPath);
   } catch (err) {
-    // folder browse failed
+    showFolderError("Native host not connected");
   }
+}
+
+function showFolderError(msg) {
+  folderPathEl.innerHTML = `<span style="color: #c62828;">${msg}</span>`;
+  folderListEl.innerHTML = "";
 }
 
 function renderBreadcrumbs(path) {
   folderPathEl.innerHTML = "";
 
-  // Split path into segments relative to vault root
-  if (!vaultRoot || !path.startsWith(vaultRoot)) {
-    folderPathEl.innerHTML = `<span class="current">${shortenPath(path)}</span>`;
-    return;
+  // Show shortened path with clickable segments
+  var homePath = path.replace(/^\/Users\/[^/]+/, "~");
+  var parts = path.split("/").filter(Boolean);
+
+  // Determine how many segments to show (last 4 max for space)
+  var startIdx = Math.max(0, parts.length - 4);
+
+  // If vault root matches, show vault name as the anchor
+  if (vaultRoot && path.startsWith(vaultRoot)) {
+    var vaultParts = vaultRoot.split("/").filter(Boolean);
+    startIdx = vaultParts.length - 1; // start from vault folder name
+
+    // Add vault home icon
+    var homeEl = document.createElement("span");
+    homeEl.className = "crumb";
+    homeEl.textContent = "~";
+    homeEl.title = "Home directory";
+    homeEl.addEventListener("click", function() {
+      var home = path.replace(/^(\/Users\/[^/]+).*/, "$1");
+      navigateToFolder(home);
+    });
+    folderPathEl.appendChild(homeEl);
+
+    var sep0 = document.createElement("span");
+    sep0.className = "sep";
+    sep0.textContent = " / ... / ";
+    folderPathEl.appendChild(sep0);
   }
 
-  // Vault root crumb
-  const rootCrumb = document.createElement("span");
-  rootCrumb.className = "crumb";
-  rootCrumb.textContent = vaultRoot.split("/").pop() || "Vault";
-  rootCrumb.addEventListener("click", () => navigateToFolder(vaultRoot));
-  folderPathEl.appendChild(rootCrumb);
-
-  // Sub-folder crumbs
-  const relative = path.slice(vaultRoot.length).replace(/^\//, "");
-  if (relative) {
-    const parts = relative.split("/");
-    let accumulated = vaultRoot;
-    for (let i = 0; i < parts.length; i++) {
-      accumulated += "/" + parts[i];
-      const sep = document.createElement("span");
+  for (var i = startIdx; i < parts.length; i++) {
+    if (i > startIdx) {
+      var sep = document.createElement("span");
       sep.className = "sep";
       sep.textContent = " / ";
       folderPathEl.appendChild(sep);
+    }
 
-      if (i === parts.length - 1) {
-        const cur = document.createElement("span");
-        cur.className = "current";
-        cur.textContent = parts[i];
-        folderPathEl.appendChild(cur);
-      } else {
-        const crumb = document.createElement("span");
-        crumb.className = "crumb";
-        crumb.textContent = parts[i];
-        const target = accumulated;
-        crumb.addEventListener("click", () => navigateToFolder(target));
-        folderPathEl.appendChild(crumb);
-      }
+    var accumulated = "/" + parts.slice(0, i + 1).join("/");
+
+    if (i === parts.length - 1) {
+      var cur = document.createElement("span");
+      cur.className = "current";
+      cur.textContent = parts[i];
+      folderPathEl.appendChild(cur);
+    } else {
+      var crumb = document.createElement("span");
+      crumb.className = "crumb";
+      crumb.textContent = parts[i];
+      crumb.addEventListener("click", (function(target) {
+        return function() { navigateToFolder(target); };
+      })(accumulated));
+      folderPathEl.appendChild(crumb);
     }
   }
+
+  // Update manual input
+  var manualInput = document.getElementById("folder-manual");
+  if (manualInput) manualInput.value = path;
 }
 
 function renderFolderList(folders, parentPath) {
@@ -225,7 +252,7 @@ async function init() {
       const savedFolder = stored.folder || vaultRoot;
       await navigateToFolder(savedFolder);
     } else {
-      // no vault found
+      showFolderError("No Obsidian vault found");
     }
     // Update API key status based on both sources
     if (!stored.apiKey && resp?.hasFileKey) {
@@ -238,7 +265,7 @@ async function init() {
     }
   } catch {
     nativeHostAvailable = false;
-    // native host not connected
+    showFolderError("Native host not connected. Run install.sh");
   }
 
   // Check if on LinkedIn
@@ -250,6 +277,25 @@ async function init() {
     notLinkedin.classList.remove("hidden");
     return;
   }
+
+  // Manual path input
+  document.getElementById("folder-go-btn").addEventListener("click", function() {
+    var manualPath = document.getElementById("folder-manual").value.trim();
+    if (manualPath) {
+      // Expand ~ to home directory
+      if (manualPath.startsWith("~/")) {
+        // We don't know home dir in JS, but the native host will expand it
+        // For display, keep it as-is — navigateToFolder sends it to native host
+      }
+      navigateToFolder(manualPath);
+    }
+  });
+
+  document.getElementById("folder-manual").addEventListener("keydown", function(e) {
+    if (e.key === "Enter") {
+      document.getElementById("folder-go-btn").click();
+    }
+  });
 
   // Run health check and update settings panel
   runHealthCheck(tabUrl);

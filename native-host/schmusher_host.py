@@ -586,7 +586,7 @@ def main():
 
     elif action == "listFolders":
         try:
-            path = msg.get("path", "")
+            path = os.path.expanduser(msg.get("path", ""))
             folders = list_folders(path)
             send_message({"success": True, "folders": folders, "path": path})
         except Exception as e:
