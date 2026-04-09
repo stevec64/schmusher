@@ -4,11 +4,9 @@ const previewEl = document.getElementById("preview");
 const notLinkedin = document.getElementById("not-linkedin");
 const formatSelect = document.getElementById("format");
 const layoutWarning = document.getElementById("layout-warning");
-const checkLayoutBtn = document.getElementById("check-layout-btn");
-const layoutResult = document.getElementById("layout-result");
 const folderPathEl = document.getElementById("folder-path");
 const folderListEl = document.getElementById("folder-list");
-const folderSelectedEl = document.getElementById("folder-selected");
+const healthBox = document.getElementById("health-box");
 
 let extractedData = null;
 let nativeHostAvailable = null;
@@ -64,9 +62,9 @@ async function navigateToFolder(path) {
 
     renderBreadcrumbs(path);
     renderFolderList(resp.folders, path);
-    folderSelectedEl.textContent = `Selected: ${shortenPath(path)}`;
+    // folder selected — path shown in breadcrumbs
   } catch (err) {
-    folderSelectedEl.textContent = "Could not browse folders";
+    // folder browse failed
   }
 }
 
@@ -227,7 +225,7 @@ async function init() {
       const savedFolder = stored.folder || vaultRoot;
       await navigateToFolder(savedFolder);
     } else {
-      folderSelectedEl.textContent = "No Obsidian vault found.";
+      // no vault found
     }
     // Update API key status based on both sources
     if (!stored.apiKey && resp?.hasFileKey) {
@@ -240,7 +238,7 @@ async function init() {
     }
   } catch {
     nativeHostAvailable = false;
-    folderSelectedEl.textContent = "Native host not connected.";
+    // native host not connected
   }
 
   // Check if on LinkedIn
@@ -253,23 +251,54 @@ async function init() {
     return;
   }
 
-  // Auto layout check — only on main profile page, not subpages
-  if (/linkedin\.com\/in\/[^/]+\/?(\?.*)?$/.test(tabUrl)) {
+  // Run health check and update settings panel
+  runHealthCheck(tabUrl);
+}
+
+async function runHealthCheck(tabUrl) {
+  if (!tabUrl || !tabUrl.includes("linkedin.com/in/")) {
+    healthBox.className = "health-box unknown";
+    healthBox.textContent = "Not on a LinkedIn profile page";
+    return;
+  }
+
   try {
-    // Wait a moment for LinkedIn's dynamic content to render
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 1500));
     const resp = await sendToTab("checkLayout");
-    if (resp?.success && !resp.data.healthy) {
+    if (!resp?.success) {
+      healthBox.className = "health-box unknown";
+      healthBox.textContent = "Could not check page";
+      return;
+    }
+
+    const r = resp.data;
+    if (r.healthy) {
+      healthBox.className = "health-box good";
+      healthBox.innerHTML = `Page health: ${r.score}% - All checks passed`;
+    } else {
+      healthBox.className = "health-box bad";
+      var msg = `Page health: ${r.score}%`;
+      if (r.failures.length > 0) msg += ` - Missing: ${r.failures.join(", ")}`;
+      if (r.warnings.length > 0) msg += ` - Optional: ${r.warnings.join(", ")}`;
+      healthBox.innerHTML = msg;
+
+      // Also show warning banner for critical failures
       layoutWarning.innerHTML =
-        `<b>Layout change detected!</b> LinkedIn may have updated their page structure. ` +
-        `${resp.data.failures.length} element(s) not found. ` +
-        `Consider rebuilding the extension with updated selectors.`;
+        `<b>Layout issue:</b> ${r.failures.length} required element(s) not found. ` +
+        `Check Settings for details.`;
       layoutWarning.classList.remove("hidden");
     }
   } catch {
-    // Will inject on demand
+    healthBox.className = "health-box unknown";
+    healthBox.textContent = "Could not connect to page";
   }
-  } // end layout check guard
+
+  // Update when settings panel is opened
+  document.getElementById("settings-panel").addEventListener("toggle", function() {
+    if (this.open && tabUrl) {
+      runHealthCheck(tabUrl);
+    }
+  });
 }
 
 // ── Settings ──
@@ -351,37 +380,6 @@ extractBtn.addEventListener("click", async () => {
   }
 });
 
-// ── Layout check ──
-
-checkLayoutBtn.addEventListener("click", async () => {
-  try {
-    const resp = await sendToTab("checkLayout");
-
-    if (!resp?.success) {
-      layoutResult.innerHTML = `<span class="bad">Could not check layout</span>`;
-      layoutResult.classList.remove("hidden");
-      return;
-    }
-
-    const r = resp.data;
-    const cls = r.healthy ? "good" : "bad";
-    let html = `<span class="${cls}">Layout health: ${r.score}%</span>`;
-
-    if (r.failures.length > 0) {
-      html += `<br/><span class="bad">Missing required: ${r.failures.join(", ")}</span>`;
-      html += `<br/><span class="bad">LinkedIn has changed their page structure. Update selectors in content.js.</span>`;
-    }
-    if (r.warnings.length > 0) {
-      html += `<br/>Optional missing: ${r.warnings.join(", ")}`;
-    }
-
-    layoutResult.innerHTML = html;
-    layoutResult.classList.remove("hidden");
-  } catch {
-    layoutResult.innerHTML = `<span class="bad">Could not connect to page. Try refreshing.</span>`;
-    layoutResult.classList.remove("hidden");
-  }
-});
 
 // ── Enrichment polling ──
 

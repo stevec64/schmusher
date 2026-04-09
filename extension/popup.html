@@ -33,11 +33,6 @@
     #extract-btn { background: #7c3aed; color: white; }
     #extract-btn:hover { background: #6d28d9; }
     #extract-btn:disabled { background: #ccc; cursor: default; }
-    .small-btn {
-      font-size: 11px; padding: 6px; background: none; color: #666;
-      text-decoration: underline; width: auto;
-    }
-    .small-btn:hover { color: #333; }
     label { font-size: 12px; color: #555; display: block; margin: 8px 0 3px 0; }
     select {
       width: 100%; padding: 6px 8px; border: 1px solid #ddd;
@@ -50,9 +45,8 @@
     .preview b { font-weight: 600; }
     .hidden { display: none; }
     .divider { border-top: 1px solid #eee; margin: 10px 0; }
-    .layout-score { font-size: 11px; text-align: right; margin-top: 4px; }
-    .layout-score .good { color: #2e7d32; }
-    .layout-score .bad { color: #c62828; }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
 
     /* Folder browser */
     .folder-browser {
@@ -64,9 +58,7 @@
       background: #f5f5f5; border-bottom: 1px solid #eee;
       display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
     }
-    .folder-path .crumb {
-      cursor: pointer; color: #7c3aed; text-decoration: underline;
-    }
+    .folder-path .crumb { cursor: pointer; color: #7c3aed; text-decoration: underline; }
     .folder-path .crumb:hover { color: #6d28d9; }
     .folder-path .sep { color: #999; }
     .folder-path .current { color: #333; font-weight: 600; }
@@ -77,11 +69,19 @@
     }
     .folder-list li:last-child { border-bottom: none; }
     .folder-list li:hover { background: #f3f0ff; }
-    .folder-list li.selected { background: #ede9fe; font-weight: 600; }
     .folder-icon { font-size: 14px; flex-shrink: 0; }
-    .folder-selected {
-      font-size: 11px; color: #7c3aed; padding: 4px 0; font-weight: 500;
+
+    /* Settings panel */
+    details summary { font-size: 11px; color: #666; cursor: pointer; }
+    .settings-section { margin-top: 8px; }
+    .settings-section label { margin-top: 6px; }
+    .health-box {
+      font-size: 11px; padding: 6px 8px; border-radius: 4px;
+      margin-top: 6px; line-height: 1.4;
     }
+    .health-box.good { background: #e8f5e9; color: #2e7d32; }
+    .health-box.bad { background: #fbe9e7; color: #c62828; }
+    .health-box.unknown { background: #f5f5f5; color: #999; }
   </style>
 </head>
 <body>
@@ -104,7 +104,6 @@
       <div class="folder-path" id="folder-path"></div>
       <ul class="folder-list" id="folder-list"></ul>
     </div>
-    <div class="folder-selected" id="folder-selected"></div>
 
     <div class="row">
       <div>
@@ -130,7 +129,7 @@
     <div class="divider"></div>
 
     <details id="batch-panel">
-      <summary style="font-size: 11px; color: #666; cursor: pointer;">Batch mode</summary>
+      <summary>Batch mode</summary>
       <div style="margin-top: 6px;">
         <label for="batch-urls">LinkedIn URLs (one per line)</label>
         <textarea id="batch-urls" rows="5" style="width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 11px; font-family: monospace; resize: vertical;" placeholder="https://www.linkedin.com/in/person1/&#10;https://www.linkedin.com/in/person2/&#10;https://www.linkedin.com/in/person3/"></textarea>
@@ -146,20 +145,24 @@
     <div class="divider"></div>
 
     <details id="settings-panel">
-      <summary style="font-size: 11px; color: #666; cursor: pointer;">Settings</summary>
-      <div style="margin-top: 6px;">
+      <summary>Settings</summary>
+      <div class="settings-section">
         <label for="api-key">Claude API Key</label>
         <div style="display: flex; gap: 4px;">
           <input type="password" id="api-key" placeholder="sk-ant-..." style="flex: 1;" />
           <button id="toggle-key-btn" style="width: auto !important; min-width: 44px; padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; cursor: pointer;">Show</button>
         </div>
         <div id="api-key-status" style="font-size: 10px; color: #999; margin-top: 2px;"></div>
+
+        <label>LinkedIn page health</label>
+        <div id="health-box" class="health-box unknown">Checking...</div>
+
+        <label>Extraction engine</label>
+        <div id="engine-status" style="font-size: 10px; color: #666; margin-top: 2px;">
+          v4: Raw text + Claude AI (DOM-independent)
+        </div>
       </div>
     </details>
-
-    <div class="divider"></div>
-    <button id="check-layout-btn" class="small-btn">Check LinkedIn layout health</button>
-    <div id="layout-result" class="layout-score hidden"></div>
   </div>
 
   <script src="builders.js"></script>

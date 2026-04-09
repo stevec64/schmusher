@@ -137,25 +137,51 @@ var PHOTO_STRATEGIES = [
     }
     return null;
   },
-  // Strategy 2: Find profile-displayphoto in any img src
+  // Strategy 2: Find the LARGEST profile-displayphoto image
+  // LinkedIn uses profile-displayphoto for both nav bar (small) and main (large)
+  // The main profile photo URL contains a larger size like "200_200" or "400_400"
+  // Nav bar photos are "100_100" or smaller
   function(doc) {
     var imgs = doc.querySelectorAll("img[src*='profile-displayphoto']");
+    var best = null;
+    var bestSize = 0;
     for (var i = 0; i < imgs.length; i++) {
-      if (imgs[i].src && !imgs[i].src.includes("ghost-person")) return imgs[i].src;
+      var src = imgs[i].src || "";
+      if (src.includes("ghost-person")) continue;
+      // Check rendered size — profile photo is much larger than nav bar
+      var w = imgs[i].naturalWidth || imgs[i].width || 0;
+      var h = imgs[i].naturalHeight || imgs[i].height || 0;
+      var size = w * h;
+      // Also check URL for size hints like "scale_200_200"
+      var urlSize = src.match(/scale_(\d+)_(\d+)/);
+      if (urlSize) size = Math.max(size, parseInt(urlSize[1]) * parseInt(urlSize[2]));
+      if (size > bestSize) {
+        bestSize = size;
+        best = src;
+      }
     }
+    // Only return if the best image is reasonably large (not a nav bar thumbnail)
+    if (best && bestSize >= 10000) return best; // at least ~100x100
     return null;
   },
-  // Strategy 3: Find square-ish images on LinkedIn CDN near the top
+  // Strategy 3: Find square-ish images on LinkedIn CDN, prefer larger ones
   function(doc) {
     var imgs = doc.querySelectorAll("img[src*='licdn']");
+    var best = null;
+    var bestSize = 0;
     for (var i = 0; i < imgs.length; i++) {
       var src = imgs[i].src || "";
       if (src.includes("background") || src.includes("cover") || src.includes("ghost")) continue;
-      var w = imgs[i].naturalWidth || imgs[i].width;
-      var h = imgs[i].naturalHeight || imgs[i].height;
+      var w = imgs[i].naturalWidth || imgs[i].width || 0;
+      var h = imgs[i].naturalHeight || imgs[i].height || 0;
       if (w > 0 && h > 0 && w / h > 2) continue; // too wide = banner
-      return src;
+      var size = w * h;
+      if (size > bestSize) {
+        bestSize = size;
+        best = src;
+      }
     }
+    if (best && bestSize >= 10000) return best;
     return null;
   },
 ];
