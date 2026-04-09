@@ -1,0 +1,7 @@
+{
+  "name": "com.schmusher.host",
+  "description": "LinkedIn Profile Schmusher - Evernote integration via AppleScript",
+  "path": "/Users/steve/dev/linkedin/native-host/schmusher_host.py",
+  "type": "stdio",
+  "allowed_origins": []
+}

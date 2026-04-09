@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; }
+    html { height: auto; }
+    body {
+      width: 380px;
+      min-height: 100px;
+      max-height: 580px;
+      overflow-y: auto;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 0;
+      margin: 0;
+      color: #333;
+      font-size: 13px;
+    }
+    .banner { width: 100%; display: block; }
+    .content { padding: 12px 16px 16px; }
+    .status {
+      padding: 8px 10px; border-radius: 6px; margin: 6px 0;
+      font-size: 12px; line-height: 1.4;
+    }
+    .status.success { background: #e8f5e9; color: #2e7d32; }
+    .status.error { background: #fbe9e7; color: #c62828; }
+    .status.info { background: #e3f2fd; color: #1565c0; }
+    .status.warning { background: #fff8e1; color: #e65100; }
+    button {
+      width: 100%; padding: 9px; border: none; border-radius: 6px;
+      font-size: 13px; cursor: pointer; margin: 3px 0;
+    }
+    #extract-btn { background: #7c3aed; color: white; }
+    #extract-btn:hover { background: #6d28d9; }
+    #extract-btn:disabled { background: #ccc; cursor: default; }
+    .small-btn {
+      font-size: 11px; padding: 6px; background: none; color: #666;
+      text-decoration: underline; width: auto;
+    }
+    .small-btn:hover { color: #333; }
+    label { font-size: 12px; color: #555; display: block; margin: 8px 0 3px 0; }
+    select {
+      width: 100%; padding: 6px 8px; border: 1px solid #ddd;
+      border-radius: 4px; font-size: 12px; margin-bottom: 4px;
+    }
+    .preview {
+      font-size: 11px; margin-top: 6px; padding: 8px; background: #f8f8f8;
+      border-radius: 4px; max-height: 140px; overflow-y: auto; line-height: 1.4;
+    }
+    .preview b { font-weight: 600; }
+    .hidden { display: none; }
+    .divider { border-top: 1px solid #eee; margin: 10px 0; }
+    .layout-score { font-size: 11px; text-align: right; margin-top: 4px; }
+    .layout-score .good { color: #2e7d32; }
+    .layout-score .bad { color: #c62828; }
+
+    /* Folder browser */
+    .folder-browser {
+      border: 1px solid #ddd; border-radius: 6px; margin: 4px 0;
+      max-height: 180px; overflow-y: auto;
+    }
+    .folder-path {
+      font-size: 11px; color: #666; padding: 6px 8px;
+      background: #f5f5f5; border-bottom: 1px solid #eee;
+      display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    }
+    .folder-path .crumb {
+      cursor: pointer; color: #7c3aed; text-decoration: underline;
+    }
+    .folder-path .crumb:hover { color: #6d28d9; }
+    .folder-path .sep { color: #999; }
+    .folder-path .current { color: #333; font-weight: 600; }
+    .folder-list { list-style: none; margin: 0; padding: 0; }
+    .folder-list li {
+      padding: 5px 10px; cursor: pointer; font-size: 12px;
+      border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 6px;
+    }
+    .folder-list li:last-child { border-bottom: none; }
+    .folder-list li:hover { background: #f3f0ff; }
+    .folder-list li.selected { background: #ede9fe; font-weight: 600; }
+    .folder-icon { font-size: 14px; flex-shrink: 0; }
+    .folder-selected {
+      font-size: 11px; color: #7c3aed; padding: 4px 0; font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <img src="schmusher.png" class="banner" alt="LinkedIn Profile Schmusher" />
+
+  <div class="content">
+    <div id="not-linkedin" class="status info hidden">
+      Navigate to a LinkedIn profile page to extract data.
+    </div>
+
+    <div id="layout-warning" class="status warning hidden"></div>
+
+    <div id="vault-picker-row" class="hidden">
+      <label for="vault-select">Vault</label>
+      <select id="vault-select"></select>
+    </div>
+
+    <label>Save to folder</label>
+    <div class="folder-browser">
+      <div class="folder-path" id="folder-path"></div>
+      <ul class="folder-list" id="folder-list"></ul>
+    </div>
+    <div class="folder-selected" id="folder-selected"></div>
+
+    <div class="row">
+      <div>
+        <label for="format">Format</label>
+        <select id="format">
+          <option value="obsidian">Obsidian (.md)</option>
+          <option value="json">JSON</option>
+        </select>
+      </div>
+      <div style="display: flex; align-items: end; padding-bottom: 6px;">
+        <label style="margin: 0; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+          <input type="checkbox" id="enrich-toggle" />
+          <span style="font-size: 12px;">Enrich with connections</span>
+        </label>
+      </div>
+    </div>
+
+    <button id="extract-btn">Schmush!</button>
+
+    <div id="status" class="status hidden"></div>
+    <div id="preview" class="preview hidden"></div>
+
+    <div class="divider"></div>
+
+    <details id="batch-panel">
+      <summary style="font-size: 11px; color: #666; cursor: pointer;">Batch mode</summary>
+      <div style="margin-top: 6px;">
+        <label for="batch-urls">LinkedIn URLs (one per line)</label>
+        <textarea id="batch-urls" rows="5" style="width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 11px; font-family: monospace; resize: vertical;" placeholder="https://www.linkedin.com/in/person1/&#10;https://www.linkedin.com/in/person2/&#10;https://www.linkedin.com/in/person3/"></textarea>
+        <div style="display: flex; gap: 4px;">
+          <button id="batch-btn" style="background: #7c3aed; color: white; flex: 1;">Batch Schmush!</button>
+          <button id="batch-cancel-btn" class="hidden" style="width: auto !important; min-width: 70px; padding: 9px 12px; background: #c62828; color: white;">Cancel</button>
+        </div>
+        <div id="batch-progress" class="status info hidden"></div>
+        <div id="batch-log" class="preview hidden" style="max-height: 200px;"></div>
+      </div>
+    </details>
+
+    <div class="divider"></div>
+
+    <details id="settings-panel">
+      <summary style="font-size: 11px; color: #666; cursor: pointer;">Settings</summary>
+      <div style="margin-top: 6px;">
+        <label for="api-key">Claude API Key</label>
+        <div style="display: flex; gap: 4px;">
+          <input type="password" id="api-key" placeholder="sk-ant-..." style="flex: 1;" />
+          <button id="toggle-key-btn" style="width: auto !important; min-width: 44px; padding: 4px 8px; font-size: 11px; background: #f0f0f0; color: #333; cursor: pointer;">Show</button>
+        </div>
+        <div id="api-key-status" style="font-size: 10px; color: #999; margin-top: 2px;"></div>
+      </div>
+    </details>
+
+    <div class="divider"></div>
+    <button id="check-layout-btn" class="small-btn">Check LinkedIn layout health</button>
+    <div id="layout-result" class="layout-score hidden"></div>
+  </div>
+
+  <script src="builders.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
