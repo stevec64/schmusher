@@ -114,39 +114,37 @@ def clean_raw_text(raw_text):
 
 
 def process_profile_with_llm(api_key, profile):
-    """Use Claude to process the profile into a clean structured format."""
-    about = profile.get("about") or ""
+    """Use Claude to process the profile into a clean structured format.
+    Uses raw page text — no dependency on DOM selectors for structured data."""
+    # Prefer experience_raw_text (from /details/experience/ subpage) over page_text
     raw_text = profile.get("experience_raw_text") or ""
+    page_text = profile.get("page_text") or ""
 
     if raw_text:
         raw_text = clean_raw_text(raw_text)
+    if page_text:
+        page_text = clean_raw_text(page_text)
 
-    # If no raw text, fall back to structured data
-    if not raw_text:
-        experiences = profile.get("experiences") or []
-        lines = []
-        for exp in experiences:
-            desc = (exp.get('description', '') or '')[:150]
-            lines.append(
-                f"- {exp.get('title', '')} at {exp.get('company', '')} "
-                f"({exp.get('date_range', '')} / {exp.get('duration', '')})"
-                + (f" - {desc}" if desc else "")
-            )
-        raw_text = "\n".join(lines)
+    # Use experience subpage text for roles, main page text for about/location/connections
+    experience_text = raw_text or page_text
+    profile_text = page_text or raw_text
 
-    prompt = f"""Parse this LinkedIn experience section and about text. Return ONLY valid JSON, no other text.
+    prompt = f"""Parse this LinkedIn profile data. Return ONLY valid JSON, no other text.
 
-RAW EXPERIENCE TEXT FROM LINKEDIN PAGE:
-(Lines prefixed with [BOARD ROLE] are board/advisory positions — these go in the "board" list ONLY, never in "employment")
-{raw_text[:5000]}
+MAIN PROFILE PAGE TEXT:
+{profile_text[:3000]}
 
-ABOUT:
-{about[:500]}
+EXPERIENCE DETAIL TEXT:
+{experience_text[:5000]}
 
 Return this JSON structure:
 {{
-  "current_company": "SHORT common name of their current actual operational job (not board role). Use the well-known short form: 'Rovio' not 'Rovio Entertainment Corporation', 'Google' not 'Google LLC', 'King' not 'King Digital Entertainment'.",
-  "current_role_short": "shortest standard form. CEO not Chief Executive Officer. VP Eng not Vice President of Engineering. Strip Full-time/Part-time/Contract.",
+  "name": "Person's full name",
+  "location": "City, Country or region as shown on profile",
+  "mutual_connections_count": number or 0,
+  "mutual_connections_names": ["Name1", "Name2"] or [],
+  "current_company": "SHORT common name of current operational job (not board). 'Rovio' not 'Rovio Entertainment Corporation'.",
+  "current_role_short": "shortest standard form. CEO not Chief Executive Officer. Strip Full-time/Part-time/Contract.",
   "about_summary": "1-2 concise sentences summarising the person. Empty string if no About.",
   "employment": [
     {{"company": "Short Company Name", "role": "Short role title", "years": "total time at company", "summary": "1 sentence max 80 chars"}},
@@ -230,14 +228,16 @@ def format_role_bullet(exp):
 
 def build_markdown(profile, llm_result):
     """Build a concise markdown note from LLM-processed data."""
-    name = profile.get("name", "Unknown")
+    # Name: prefer LLM-extracted, fall back to content script heuristic
+    name = llm_result.get("name") or profile.get("name", "Unknown")
     company = llm_result.get("current_company", "Independent")
     role_short = llm_result.get("current_role_short", "Professional")
     url = profile.get("url", "")
 
     note_title = f"{name} - {company} - {role_short}"
 
-    location = profile.get("location", "")
+    # Location: from LLM
+    location = llm_result.get("location", "")
     lines = []
     link_line = f"[LinkedIn Profile]({url})" if url else ""
     if link_line and location:
@@ -246,12 +246,13 @@ def build_markdown(profile, llm_result):
         link_line = location
     lines.append(link_line)
 
-    # Mutual connections
-    mc = profile.get("mutual_connections", {})
-    if mc.get("count", 0) > 0:
-        mc_line = f"**{mc['count']} mutual connection{'s' if mc['count'] != 1 else ''}**"
-        if mc.get("names"):
-            mc_line += f" including {', '.join(mc['names'])}"
+    # Mutual connections: from LLM
+    mc_count = llm_result.get("mutual_connections_count", 0)
+    mc_names = llm_result.get("mutual_connections_names", [])
+    if mc_count > 0:
+        mc_line = f"**{mc_count} mutual connection{'s' if mc_count != 1 else ''}**"
+        if mc_names:
+            mc_line += f" including {', '.join(mc_names)}"
         lines.append(mc_line)
 
     lines.append("")
@@ -324,58 +325,28 @@ def build_markdown(profile, llm_result):
 
 
 def build_markdown_fallback(profile):
-    """Fallback without LLM -- simple concise format."""
-    experiences = profile.get("experiences") or []
+    """Fallback without LLM -- raw text dump with basic formatting."""
     name = profile.get("name", "Unknown")
-    company = experiences[0].get("company", "Independent") if experiences else "Independent"
-    role = short_role(experiences[0].get("title", "") if experiences else "")
     url = profile.get("url", "")
 
-    note_title = f"{name} - {company} - {role}"
+    note_title = f"{name}"
 
-    location = profile.get("location", "")
     lines = []
-    link_line = f"[LinkedIn Profile]({url})" if url else ""
-    if link_line and location:
-        link_line += f" | {location}"
-    elif location:
-        link_line = location
-    lines.append(link_line)
-
-    mc = profile.get("mutual_connections", {})
-    if mc.get("count", 0) > 0:
-        mc_line = f"**{mc['count']} mutual connection{'s' if mc['count'] != 1 else ''}**"
-        if mc.get("names"):
-            mc_line += f" including {', '.join(mc['names'])}"
-        lines.append(mc_line)
-
+    if url:
+        lines.append(f"[LinkedIn Profile]({url})")
     lines.append("")
 
     if profile.get("photo_url"):
         lines.append(f"![{name}]({profile['photo_url']})")
         lines.append("")
 
-    about = profile.get("about", "")
-    if about:
-        sentences = re.split(r'(?<=[.!?])\s+', about)
-        lines.append(f"*{' '.join(sentences[:2])}*")
-        lines.append("")
-
-    for exp in experiences[:5]:
-        lines.append(format_role_bullet(exp))
-    if experiences:
-        lines.append("")
-
-    edus = profile.get("education") or []
-    if edus:
-        edu_parts = []
-        for e in edus:
-            s = e.get("school", "")
-            if e.get("degree"):
-                s += f" ({e['degree']})"
-            edu_parts.append(s)
-        lines.append(f"**Education:** {'; '.join(edu_parts)}")
-        lines.append("")
+    # Include raw page text as-is when LLM is unavailable
+    page_text = profile.get("page_text", "")
+    if page_text:
+        lines.append(page_text[:3000])
+    else:
+        lines.append("*Profile data could not be processed (no API key configured)*")
+    lines.append("")
 
     return note_title, "\n".join(lines)
 
@@ -640,7 +611,7 @@ def main():
                 return
 
             # Markdown format — use LLM if available
-            if api_key and profile.get("experiences"):
+            if api_key and (profile.get("page_text") or profile.get("experience_raw_text") or profile.get("experiences")):
                 try:
                     llm_result = process_profile_with_llm(api_key, profile)
                     title, content = build_markdown(profile, llm_result)
