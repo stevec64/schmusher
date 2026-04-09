@@ -173,7 +173,7 @@ async function init() {
 
   // Enrich toggle
   const enrichToggle = document.getElementById("enrich-toggle");
-  enrichToggle.checked = stored.enrich !== false; // default on
+  enrichToggle.checked = stored.enrich === true; // default off
   enrichToggle.addEventListener("change", () => {
     chrome.storage.local.set({ enrich: enrichToggle.checked });
   });
@@ -388,7 +388,7 @@ extractBtn.addEventListener("click", async () => {
       folder: currentFolder,
       ext,
       apiKey: apiKey || "",
-      enrich: enrich !== false,
+      enrich: enrich === true,
     });
 
     // Poll for completion

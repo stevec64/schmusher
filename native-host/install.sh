@@ -1,41 +1,54 @@
 #!/bin/bash
-# Install the native messaging host for LinkedIn Profile Schmusher.
+# Install the native messaging host for LinkedIn Profile Schmusher (macOS/Linux).
 # Usage: ./install.sh <chrome-extension-id>
 #
 # To find your extension ID:
 #   1. Go to chrome://extensions
-#   2. Find "LinkedIn Profile Schmusher"
-#   3. Copy the ID (e.g., abcdefghijklmnopabcdefghijklmnop)
+#   2. Enable "Developer mode"
+#   3. Find "LinkedIn Profile Schmusher"
+#   4. Copy the ID
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOST_NAME="com.schmusher.host"
 HOST_PY="$SCRIPT_DIR/schmusher_host.py"
-MANIFEST_SRC="$SCRIPT_DIR/$HOST_NAME.json"
-MANIFEST_DIR="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
-MANIFEST_DEST="$MANIFEST_DIR/$HOST_NAME.json"
 
 if [ -z "$1" ]; then
     echo "Usage: $0 <chrome-extension-id>"
     echo ""
     echo "Find your extension ID at chrome://extensions"
-    echo "(Look for 'LinkedIn Profile Schmusher' and copy the ID)"
     exit 1
 fi
 
 EXT_ID="$1"
 
+# Determine manifest directory based on OS
+if [ "$(uname)" = "Darwin" ]; then
+    MANIFEST_DIR="$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts"
+else
+    MANIFEST_DIR="$HOME/.config/google-chrome/NativeMessagingHosts"
+fi
+
+MANIFEST_DEST="$MANIFEST_DIR/$HOST_NAME.json"
+
 # Ensure the host script is executable
 chmod +x "$HOST_PY"
 
-# Create the manifest with the correct extension ID and path
+# Check Python is available
+if ! command -v python3 &> /dev/null; then
+    echo "Error: python3 is required but not found."
+    echo "Install Python 3 from https://python.org"
+    exit 1
+fi
+
+# Create the manifest
 mkdir -p "$MANIFEST_DIR"
 
 cat > "$MANIFEST_DEST" << EOF
 {
   "name": "$HOST_NAME",
-  "description": "LinkedIn Profile Schmusher - Evernote integration via AppleScript",
+  "description": "LinkedIn Profile Schmusher native messaging host",
   "path": "$HOST_PY",
   "type": "stdio",
   "allowed_origins": [
@@ -44,9 +57,10 @@ cat > "$MANIFEST_DEST" << EOF
 }
 EOF
 
+echo ""
 echo "Installed native messaging host:"
 echo "  Manifest: $MANIFEST_DEST"
 echo "  Host:     $HOST_PY"
 echo "  Extension ID: $EXT_ID"
 echo ""
-echo "Done! Restart Chrome for the changes to take effect."
+echo "Restart Chrome for changes to take effect."

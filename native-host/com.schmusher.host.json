@@ -1,7 +1,7 @@
 {
   "name": "com.schmusher.host",
-  "description": "LinkedIn Profile Schmusher - Evernote integration via AppleScript",
-  "path": "/Users/steve/dev/linkedin/native-host/schmusher_host.py",
+  "description": "LinkedIn Profile Schmusher native messaging host",
+  "path": "PLACEHOLDER - run install.sh or install-windows.bat to configure",
   "type": "stdio",
   "allowed_origins": []
 }

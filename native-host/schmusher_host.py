@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """
 Native messaging host for LinkedIn Profile Schmusher.
-Uses Claude API to intelligently process profiles before saving to Obsidian.
+Uses Claude API to intelligently process LinkedIn profiles and save as Markdown or JSON.
 """
 
 import json
 import os
+import platform
 import re
 import struct
 import subprocess
 import sys
 import urllib.request
 import urllib.error
+
+# Windows binary mode for stdin/stdout (required for native messaging protocol)
+if platform.system() == "Windows":
+    import msvcrt
+    msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
+    msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
 
 
 def read_message():
@@ -351,11 +358,23 @@ def build_markdown_fallback(profile):
     return note_title, "\n".join(lines)
 
 
-def find_obsidian_vaults():
-    vaults = []
-    obsidian_config = os.path.expanduser(
-        "~/Library/Application Support/obsidian/obsidian.json"
-    )
+def find_default_folders():
+    """Find suggested default folders: Obsidian vaults, Documents, Desktop."""
+    folders = []
+
+    # Try to find Obsidian vaults
+    system = platform.system()
+    if system == "Darwin":
+        obsidian_config = os.path.expanduser(
+            "~/Library/Application Support/obsidian/obsidian.json"
+        )
+    elif system == "Windows":
+        obsidian_config = os.path.join(
+            os.environ.get("APPDATA", ""), "obsidian", "obsidian.json"
+        )
+    else:
+        obsidian_config = os.path.expanduser("~/.config/obsidian/obsidian.json")
+
     if os.path.exists(obsidian_config):
         try:
             with open(obsidian_config) as f:
@@ -363,78 +382,131 @@ def find_obsidian_vaults():
             for vault_info in config.get("vaults", {}).values():
                 path = vault_info.get("path", "")
                 if path and os.path.isdir(path):
-                    vaults.append(path)
+                    folders.append(path)
         except Exception:
             pass
 
-    if not vaults:
-        search_paths = [
-            os.path.expanduser("~/Documents"),
-            os.path.expanduser("~/Dropbox"),
-            os.path.expanduser("~/Library/Mobile Documents/iCloud~md~obsidian/Documents"),
-            os.path.expanduser("~/OneDrive"),
-        ]
-        for base in search_paths:
-            if not os.path.isdir(base):
-                continue
-            for entry in os.scandir(base):
-                if entry.is_dir() and os.path.isdir(os.path.join(entry.path, ".obsidian")):
-                    vaults.append(entry.path)
+    # Add common locations as fallbacks
+    home = os.path.expanduser("~")
+    for subdir in ["Documents", "Desktop", "Dropbox", "OneDrive"]:
+        p = os.path.join(home, subdir)
+        if os.path.isdir(p) and p not in folders:
+            folders.append(p)
 
-    return sorted(set(vaults))
+    # Always include home as last resort
+    if not folders:
+        folders.append(home)
+
+    return sorted(set(folders))
 
 
 def run_enrich_skill(filepath):
     """Run the enrich-profile Claude Code skill on a saved note.
     Reads the skill definition and passes it as a prompt to claude CLI.
     Runs in the background (non-blocking)."""
-    # Find the vault root (.obsidian directory) and its parent for Claude cwd
-    vault_root = None
-    check = os.path.dirname(filepath)
-    while check and check != "/":
-        if os.path.isdir(os.path.join(check, ".obsidian")):
-            vault_root = check
+    # Find a project root (look for .obsidian, .git, or just use the file's directory)
+    project_root = os.path.dirname(filepath)
+    check = project_root
+    root_sentinel = "/" if platform.system() != "Windows" else ""
+    while check and check != root_sentinel:
+        if (os.path.isdir(os.path.join(check, ".obsidian")) or
+            os.path.isdir(os.path.join(check, ".git"))):
+            project_root = check
             break
-        check = os.path.dirname(check)
-    if not vault_root:
-        vault_root = os.path.dirname(filepath)
-    # Claude project is mapped to the parent of the vault (e.g. /Users/steve/Dropbox/obsidian)
-    claude_cwd = os.path.dirname(vault_root)
+        parent = os.path.dirname(check)
+        if parent == check:
+            break
+        check = parent
+
+    # Claude cwd: use parent of project root (where Claude project config lives)
+    claude_cwd = os.path.dirname(project_root)
     if not os.path.isdir(claude_cwd):
-        claude_cwd = vault_root
+        claude_cwd = project_root
 
-    # Find the skill definition file
-    skill_path = os.path.expanduser(
-        "~/.claude/projects/-Users-steve-Dropbox-obsidian/commands/enrich-profile.md"
+    # Look for enrichment skill file in Claude project config
+    # Users configure this by creating a skill file for their vault/project
+    skill_search_paths = []
+    # Convert project path to Claude's project key format
+    cwd_key = claude_cwd.replace("/", "-").replace("\\", "-")
+    if cwd_key.startswith("-"):
+        cwd_key = cwd_key  # keep leading dash
+    skill_search_paths.append(
+        os.path.expanduser(f"~/.claude/projects/{cwd_key}/commands/enrich-profile.md")
     )
-    if not os.path.exists(skill_path):
-        return "Skill file not found"
+    # Also check parent directory key
+    parent_key = os.path.dirname(claude_cwd).replace("/", "-").replace("\\", "-")
+    skill_search_paths.append(
+        os.path.expanduser(f"~/.claude/projects/{parent_key}/commands/enrich-profile.md")
+    )
 
-    claude_path = os.path.expanduser("~/.local/bin/claude")
-    if not os.path.exists(claude_path):
-        claude_path = "claude"
+    skill_path = None
+    for sp in skill_search_paths:
+        if os.path.exists(sp):
+            skill_path = sp
+            break
 
-    status_file = os.path.join(vault_root, ".schmusher_enrich_status")
-    log_file = os.path.join(vault_root, ".schmusher_enrich_log")
+    if not skill_path:
+        return "No enrichment skill found. See README for setup instructions."
+
+    # Find claude CLI
+    claude_candidates = [
+        os.path.expanduser("~/.local/bin/claude"),
+        os.path.expanduser("~/.claude/local/claude"),
+    ]
+    if platform.system() == "Windows":
+        claude_candidates.extend([
+            os.path.expanduser("~\\AppData\\Local\\Programs\\claude\\claude.exe"),
+            "claude",
+        ])
+    else:
+        claude_candidates.append("claude")
+
+    claude_path = "claude"
+    for cp in claude_candidates:
+        if os.path.exists(cp):
+            claude_path = cp
+            break
+
+    status_file = os.path.join(project_root, ".schmusher_enrich_status")
+    log_file = os.path.join(project_root, ".schmusher_enrich_log")
 
     # Delete old status first so poll doesn't see stale "done"
     if os.path.exists(status_file):
         os.unlink(status_file)
 
-    # Prompt that tells claude to read the skill file and execute it
     prompt = (
         f"Read the instructions in {skill_path} and execute them "
         f"on this profile file: {filepath}. "
         f"IMPORTANT: Do NOT move or rename the file. Edit it in its current location only. "
-        f"Skip Step 4 (Determine File Location) and Step 6 (Update Index) entirely. "
-        f"FORMATTING: In the Connections section, do NOT add blank lines between bullet points. "
+        f"FORMATTING: In any added sections, do NOT add blank lines between bullet points. "
         f"Keep each bullet to a maximum of 2 lines. Be concise."
     )
 
-    # Write a small monitor script that runs claude then updates status
-    monitor_script = os.path.join(vault_root, ".schmusher_enrich_run.sh")
-    with open(monitor_script, "w") as ms:
-        ms.write(f'''#!/bin/bash
+    # Create platform-appropriate monitor script
+    if platform.system() == "Windows":
+        monitor_script = os.path.join(project_root, ".schmusher_enrich_run.bat")
+        with open(monitor_script, "w") as ms:
+            ms.write(f'''@echo off
+cd /d "{claude_cwd}"
+"{claude_path}" -p "Read the instructions in {skill_path} and execute them on this profile file: {filepath}" --dangerously-skip-permissions > "{log_file}" 2>&1
+if %ERRORLEVEL% EQU 0 (
+    echo {{"status":"done","file":"{filepath}"}} > "{status_file}"
+) else (
+    echo {{"status":"failed","file":"{filepath}","rc":%ERRORLEVEL%}} > "{status_file}"
+)
+del "{monitor_script}"
+''')
+        proc = subprocess.Popen(
+            ["cmd", "/c", monitor_script],
+            cwd=claude_cwd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    else:
+        monitor_script = os.path.join(project_root, ".schmusher_enrich_run.sh")
+        with open(monitor_script, "w") as ms:
+            ms.write(f'''#!/bin/bash
 export HOME="{os.path.expanduser("~")}"
 export PATH="/usr/local/bin:/usr/bin:/bin:{os.path.expanduser("~/.local/bin")}"
 cd "{claude_cwd}"
@@ -447,15 +519,14 @@ else
 fi
 rm -f "{monitor_script}"
 ''')
-    os.chmod(monitor_script, 0o755)
-
-    proc = subprocess.Popen(
-        [monitor_script],
-        cwd=claude_cwd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+        os.chmod(monitor_script, 0o755)
+        proc = subprocess.Popen(
+            [monitor_script],
+            cwd=claude_cwd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
 
     with open(status_file, "w") as sf:
         sf.write(json.dumps({"status": "running", "file": filepath, "pid": proc.pid}))
@@ -542,7 +613,7 @@ def main():
     action = msg.get("action")
 
     if action == "ping":
-        vaults = find_obsidian_vaults()
+        vaults = find_default_folders()
         file_key = load_api_key()
         send_message({
             "success": True,
@@ -555,14 +626,19 @@ def main():
     elif action == "checkEnrich":
         try:
             folder = msg.get("folder", "")
-            vault_root = None
+            # Walk up to find project root (.obsidian or .git)
+            project_root = None
             check = os.path.expanduser(folder)
-            while check and check != "/":
-                if os.path.isdir(os.path.join(check, ".obsidian")):
-                    vault_root = check
+            while check:
+                if (os.path.isdir(os.path.join(check, ".obsidian")) or
+                    os.path.isdir(os.path.join(check, ".git"))):
+                    project_root = check
                     break
-                check = os.path.dirname(check)
-            status_file = os.path.join(vault_root or folder, ".schmusher_enrich_status")
+                parent = os.path.dirname(check)
+                if parent == check:
+                    break
+                check = parent
+            status_file = os.path.join(project_root or folder, ".schmusher_enrich_status")
             if os.path.exists(status_file):
                 with open(status_file) as sf:
                     status = json.load(sf)

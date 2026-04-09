@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "LinkedIn Profile Schmusher",
   "version": "3.0.0",
-  "description": "Extract LinkedIn profiles and save to Obsidian",
+  "description": "Extract LinkedIn profiles and save structured summaries using Claude AI",
   "permissions": ["activeTab", "tabs", "storage", "scripting", "nativeMessaging"],
   "host_permissions": ["https://www.linkedin.com/*"],
   "icons": {
