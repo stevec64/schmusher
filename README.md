@@ -1,6 +1,6 @@
 # LinkedIn Profile Schmusher
 
-A Chrome extension that extracts LinkedIn profiles and saves concise, structured summaries as Markdown or JSON files. Uses Claude AI to intelligently classify roles, summarise career history, and identify board memberships.
+A Chrome extension that extracts LinkedIn profiles and saves concise, structured summaries as Markdown or JSON files. Uses Claude AI to intelligently classify roles, summarise career history, and identify board memberships. I use this primarily as the main profile I create when meeting people and recording meeting notes. In my case I use Obsidian for a knowldge base and when the summary is created, the extension cross references with my knowledge base to look for interesting and relevant links to the person in the profile. This is super useful when meeting people for the first time, but the profile summariser is useful in its own right, even without the enrichment pass.
 
 ## What it does
 
